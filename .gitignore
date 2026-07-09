@@ -2,3 +2,5 @@ node_modules/
 dist/
 dist-test/
 *.log
+scripts/demo/frames/
+scripts/demo/*.mp4
