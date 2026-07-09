@@ -1,6 +1,6 @@
 {
   "name": "clipkeep-for-notion",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Reliable, taggable web clipper for Notion (Chrome MV3 extension)",
   "private": true,
   "scripts": {

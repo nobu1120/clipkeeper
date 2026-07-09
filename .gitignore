@@ -4,3 +4,4 @@ dist-test/
 *.log
 scripts/demo/frames/
 scripts/demo/*.mp4
+release/
