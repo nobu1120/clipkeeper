@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>テスト記事タイトル</title>
+  </head>
+  <body>
+    <nav>サイト内ナビゲーション（本文ではない）</nav>
+    <article>
+      <h1>クリップ機能の検証用サンプル記事</h1>
+      <p>
+        これはClipKeepの本文抽出ロジックを検証するためのサンプル記事です。十分な長さの文章を用意して、
+        Readabilityアルゴリズムが本文とみなせるようにしています。段落が複数あり、見出しやリスト、
+        コードブロックなども含めて抽出できるかどうかを確認します。
+      </p>
+      <h2>小見出しその1</h2>
+      <p>
+        二つ目の段落です。ここにも十分な文章量を持たせておくことで、本文抽出の対象として認識されやすくなります。
+        ClipKeepは、この本文を複数のNotionブロックに変換して保存します。
+      </p>
+      <ul>
+        <li>リスト項目A</li>
+        <li>リスト項目B</li>
+      </ul>
+      <blockquote>これは引用ブロックのテストです。</blockquote>
+      <pre><code>console.log("hello from code block");</code></pre>
+      <p>最後の段落です。ここまでの内容が正しくブロックへ変換されることを期待します。</p>
+    </article>
+    <footer>フッター（本文ではない）</footer>
+  </body>
+</html>

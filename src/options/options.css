@@ -1,0 +1,168 @@
+:root {
+  color-scheme: light dark;
+  --fg: #1a1a1a;
+  --bg: #ffffff;
+  --panel: #f7f7f7;
+  --muted: #6b6b6b;
+  --border: #e2e2e2;
+  --accent: #2f6f4f;
+  --accent-fg: #ffffff;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+  --success-bg: #e8f5e9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #eaeaea;
+    --bg: #141414;
+    --panel: #1e1e1e;
+    --muted: #a0a0a0;
+    --border: #3a3a3a;
+    --accent: #4caf7d;
+    --accent-fg: #0c1a12;
+    --danger: #ff6b60;
+    --danger-bg: #3a201e;
+    --success-bg: #16301c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  font-size: 14px;
+}
+
+#app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+p {
+  line-height: 1.6;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+input[type="text"],
+input[type="password"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+button {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.banner {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.banner.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.banner.success {
+  background: var(--success-bg);
+}
+
+.db-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.db-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+}
+
+code {
+  background: var(--panel);
+  padding: 1px 5px;
+  border-radius: 4px;
+}

@@ -1,0 +1,26 @@
+{
+  "name": "clipkeep-for-notion",
+  "version": "0.1.0",
+  "description": "Reliable, taggable web clipper for Notion (Chrome MV3 extension)",
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "build:test": "node esbuild.test.mjs",
+    "test:logic": "node scripts/logic-test.mjs",
+    "test:extraction": "node scripts/extraction-test.mjs",
+    "test:ui": "node scripts/ui-test.mjs",
+    "test": "npm run build && npm run build:test && npm run test:logic && npm run test:extraction && npm run test:ui",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.270",
+    "esbuild": "^0.23.1",
+    "puppeteer-core": "^23.5.0",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0"
+  }
+}

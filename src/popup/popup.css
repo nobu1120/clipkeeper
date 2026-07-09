@@ -1,0 +1,174 @@
+:root {
+  color-scheme: light dark;
+  --fg: #1a1a1a;
+  --bg: #ffffff;
+  --muted: #6b6b6b;
+  --border: #e2e2e2;
+  --accent: #2f6f4f;
+  --accent-fg: #ffffff;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+  --success-bg: #e8f5e9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #eaeaea;
+    --bg: #1e1e1e;
+    --muted: #a0a0a0;
+    --border: #3a3a3a;
+    --accent: #4caf7d;
+    --accent-fg: #0c1a12;
+    --danger: #ff6b60;
+    --danger-bg: #3a201e;
+    --success-bg: #16301c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 340px;
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  font-size: 13px;
+}
+
+#app {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+h1 {
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+
+.subtitle {
+  color: var(--muted);
+  margin: 0;
+}
+
+.loading {
+  color: var(--muted);
+  text-align: center;
+  padding: 20px 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+input[type="text"],
+select,
+textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+button {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.row > * {
+  flex: 1;
+}
+
+.usage {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.banner {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.banner.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.banner.success {
+  background: var(--success-bg);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+a {
+  color: var(--accent);
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-option {
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tag-option.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
