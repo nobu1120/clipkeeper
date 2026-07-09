@@ -3,7 +3,6 @@
   "name": "ClipKeep for Notion",
   "version": "0.1.0",
   "description": "Notionへ確実に、タグ付けして保存できるクリッパー。保存失敗が分かりやすく、保存時にプロパティ設定までできます。",
-  "default_locale": "en",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
