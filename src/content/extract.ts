@@ -60,10 +60,21 @@ function htmlToBlocks(root: HTMLElement): NotionBlockDraft[] {
         case "section":
         case "article":
         case "figure":
+        case "main":
           walk(child);
           break;
         default:
-          if (text) blocks.push({ type: "paragraph", text });
+          // Unknown container tags (header/aside/details/custom elements, or
+          // any future HTML we haven't special-cased) still have their own
+          // element children, so recurse into them rather than collapsing
+          // the whole subtree's text into a single paragraph — that flattens
+          // real-world articles (e.g. content wrapped in <main>) into one
+          // giant block and discards all headings/lists/code/images inside.
+          if (child.children.length > 0) {
+            walk(child);
+          } else if (text) {
+            blocks.push({ type: "paragraph", text });
+          }
       }
       if (blocks.length >= 95) break;
     }
@@ -74,9 +85,14 @@ function htmlToBlocks(root: HTMLElement): NotionBlockDraft[] {
 }
 
 export function extractFullPage(): ExtractedContent {
-  const docClone = document.cloneNode(true) as Document;
-  const reader = new Readability(docClone, { keepClasses: false });
-  const article = reader.parse();
+  let article: ReturnType<Readability["parse"]> | null = null;
+  try {
+    const docClone = document.cloneNode(true) as Document;
+    const reader = new Readability(docClone, { keepClasses: false });
+    article = reader.parse();
+  } catch {
+    article = null;
+  }
 
   if (!article || !article.content) {
     return {
@@ -88,8 +104,11 @@ export function extractFullPage(): ExtractedContent {
     };
   }
 
-  const wrapper = document.createElement("div");
-  wrapper.innerHTML = article.content;
+  // Parse into a document created via DOMParser rather than assigning to a
+  // live element's innerHTML: per spec, DOMParser output is fully inert (no
+  // subresource loads, no script/event-handler execution), which matters
+  // because `article.content` is untrusted HTML from an arbitrary web page.
+  const wrapper = new DOMParser().parseFromString(article.content, "text/html").body;
   const blocks = htmlToBlocks(wrapper);
 
   return {

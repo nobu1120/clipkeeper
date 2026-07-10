@@ -189,12 +189,14 @@ try {
   assert.ok(text.includes("登録しました"), "options should confirm database registration");
   console.log("[options] register database OK");
 
-  await optionsPage.type("#license-input", "not-a-real-key");
-  await optionsPage.click("#activate-license");
-  await new Promise((r) => setTimeout(r, 300));
   text = await optionsPage.evaluate(() => document.body.innerText);
-  assert.ok(text.includes("正しくありません"), "malformed license key should show an error");
-  console.log("[options] invalid license rejected OK");
+  assert.ok(!text.includes("ライセンスキー"), "options page must not show any license/purchase UI (MVP is free-only)");
+  assert.equal(
+    await optionsPage.$("#license-input"),
+    null,
+    "license key input must not be present in the free-only MVP build"
+  );
+  console.log("[options] no Pro/license UI present OK");
 
   await optionsPage.close();
 

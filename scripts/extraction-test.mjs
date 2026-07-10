@@ -26,6 +26,14 @@ try {
   assert.ok(!JSON.stringify(fullPageResult.blocks).includes("ナビゲーション"), "nav chrome should be excluded by Readability");
   assert.ok(!JSON.stringify(fullPageResult.blocks).includes("フッター"), "footer chrome should be excluded by Readability");
 
+  // Regression guard: the fixture's content lives inside a <main> element
+  // (not <article>/<div>/<section>/<figure>). htmlToBlocks() previously only
+  // recursed into that fixed tag whitelist, so unrecognized containers like
+  // <main> got flattened into a single giant paragraph, silently discarding
+  // all headings/lists/quotes/code. Multiple distinct block types surviving
+  // here proves the walk() recursed into <main> instead of collapsing it.
+  assert.ok(fullPageResult.blocks.length > 5, "content wrapped in <main> should not collapse into one paragraph block");
+
   const types = fullPageResult.blocks.map((b) => b.type);
   assert.ok(
     types.includes("heading_1") || types.includes("heading_2") || types.includes("heading_3"),
@@ -39,7 +47,7 @@ try {
 
   // Selection extraction
   await page.evaluate(() => {
-    const p = document.querySelector("article p");
+    const p = document.querySelector("main p");
     const range = document.createRange();
     range.selectNodeContents(p);
     const sel = window.getSelection();

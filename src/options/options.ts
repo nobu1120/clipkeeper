@@ -99,38 +99,15 @@ function renderConnectionSection(): HTMLElement {
 }
 
 function renderPlanSection(): HTMLElement {
-  const remaining =
-    state.plan.tier === "pro"
-      ? "無制限"
-      : `${Math.max(FREE_MONTHLY_CLIP_LIMIT - state.usage.clipCount, 0)} / ${FREE_MONTHLY_CLIP_LIMIT} 件（今月）`;
+  const remaining = `${Math.max(FREE_MONTHLY_CLIP_LIMIT - state.usage.clipCount, 0)} / ${FREE_MONTHLY_CLIP_LIMIT} 件（今月）`;
 
-  const section = el("section", {}, [
+  return el("section", {}, [
     el("h2", {}, ["プラン"]),
     el("p", {}, [
-      state.plan.tier === "pro" ? el("span", { class: "badge" }, ["Pro"]) : el("span", {}, ["Free"]),
-      ` — クリップ残り: ${remaining} / データベース登録上限: ${
-        state.plan.tier === "pro" ? "無制限" : `${FREE_MAX_DATABASES}件`
-      }`,
+      el("span", {}, ["Free"]),
+      ` — クリップ残り: ${remaining} / データベース登録上限: ${FREE_MAX_DATABASES}件`,
     ]),
   ]);
-
-  if (state.plan.tier === "pro") {
-    const deactivate = el("button", { id: "deactivate-license" }, ["Proを解除（開発用）"]);
-    deactivate.addEventListener("click", () => void deactivateLicense());
-    section.append(deactivate);
-  } else {
-    section.append(
-      el("p", { class: "muted" }, [
-        "Proプラン（開発中）: クリップ数無制限・データベース複数登録・テンプレート機能。",
-        " 決済連携は今後実装予定です。ライセンスキーをお持ちの場合はこちらで有効化できます。",
-      ]),
-      el("input", { type: "text", id: "license-input", placeholder: "CLIPKEEP-PRO-XXXX-XXXX-XXXX" }),
-      el("button", { class: "primary", id: "activate-license" }, ["ライセンスキーを適用"])
-    );
-    section.querySelector("#activate-license")!.addEventListener("click", () => void activateLicense());
-  }
-
-  return section;
 }
 
 function renderDatabaseSection(): HTMLElement {
@@ -235,25 +212,6 @@ async function registerDatabase(db: NotionDatabaseSummary): Promise<void> {
 async function unregisterDatabase(databaseId: string): Promise<void> {
   await sendMessage({ type: "UNREGISTER_DATABASE", databaseId });
   state.registered = await sendMessage<RegisteredDatabase[]>({ type: "GET_REGISTERED_DATABASES" });
-  render();
-}
-
-async function activateLicense(): Promise<void> {
-  const input = document.getElementById("license-input") as HTMLInputElement;
-  const licenseKey = input.value.trim();
-  const result = await sendMessage<{ ok: boolean }>({ type: "ACTIVATE_LICENSE", licenseKey });
-  if (result.ok) {
-    state.plan = await sendMessage<PlanState>({ type: "GET_PLAN" });
-    state.banner = { kind: "success", text: "Proを有効化しました。" };
-  } else {
-    state.banner = { kind: "error", text: "ライセンスキーの形式が正しくありません。" };
-  }
-  render();
-}
-
-async function deactivateLicense(): Promise<void> {
-  await sendMessage({ type: "DEACTIVATE_LICENSE" });
-  state.plan = await sendMessage<PlanState>({ type: "GET_PLAN" });
   render();
 }
 

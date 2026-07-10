@@ -43,7 +43,7 @@ export async function testConnection(token: string): Promise<{
       };
     }
     const data = await res.json();
-    return { ok: true, workspaceName: data?.bot?.owner?.workspace ? data.name : data.name };
+    return { ok: true, workspaceName: data?.bot?.workspace_name ?? data?.name };
   } catch (err) {
     return { ok: false, message: (err as Error).message };
   }
