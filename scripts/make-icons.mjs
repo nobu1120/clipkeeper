@@ -27,7 +27,11 @@ function chunk(type, data) {
   return Buffer.concat([len, typeBuf, data, crcBuf]);
 }
 
-function makePng(size, [r, g, b, a]) {
+// Draws a filled circle in `bgColor` with a white "C" ring mark on top (a
+// ring with a wedge cut out on the right, standing in for ClipKeep's
+// initial). Still a generated placeholder, not a designed logo, but more
+// distinctive than a plain solid dot.
+function makePng(size, bgColor, markColor) {
   const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0);
@@ -38,6 +42,13 @@ function makePng(size, [r, g, b, a]) {
   ihdr[11] = 0;
   ihdr[12] = 0;
 
+  const cx = size / 2;
+  const cy = size / 2;
+  const bgRadius = size * 0.46;
+  const ringOuter = size * 0.32;
+  const ringInner = size * 0.2;
+  const openHalfAngleDeg = 40;
+
   const rowLen = size * 4;
   const raw = Buffer.alloc((rowLen + 1) * size);
   for (let y = 0; y < size; y++) {
@@ -45,14 +56,22 @@ function makePng(size, [r, g, b, a]) {
     raw[rowStart] = 0; // filter type: none
     for (let x = 0; x < size; x++) {
       const px = rowStart + 1 + x * 4;
-      // simple rounded-corner-ish circle mark on transparent bg
-      const cx = size / 2, cy = size / 2, radius = size * 0.42;
-      const dx = x - cx + 0.5, dy = y - cy + 0.5;
-      const inside = dx * dx + dy * dy <= radius * radius;
+      const dx = x - cx + 0.5;
+      const dy = y - cy + 0.5;
+      const distSq = dx * dx + dy * dy;
+      const dist = Math.sqrt(distSq);
+      const insideBg = distSq <= bgRadius * bgRadius;
+      const insideRing = dist <= ringOuter && dist >= ringInner;
+      const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+      const isOpening = Math.abs(angleDeg) <= openHalfAngleDeg;
+      const insideMark = insideRing && !isOpening;
+
+      const [r, g, b, a] = insideMark ? markColor : bgColor;
+      const visible = insideMark || insideBg;
       raw[px] = r;
       raw[px + 1] = g;
       raw[px + 2] = b;
-      raw[px + 3] = inside ? a : 0;
+      raw[px + 3] = visible ? a : 0;
     }
   }
   const idat = deflateSync(raw);
@@ -65,9 +84,10 @@ function makePng(size, [r, g, b, a]) {
 }
 
 mkdirSync(new URL("../public/icons", import.meta.url), { recursive: true });
-const color = [26, 26, 26, 255]; // near-black circle, Notion-ish minimal mark
+const bgColor = [37, 99, 235, 255]; // brand blue circle
+const markColor = [255, 255, 255, 255]; // white "C" ring mark
 for (const size of [16, 48, 128]) {
-  const png = makePng(size, color);
+  const png = makePng(size, bgColor, markColor);
   writeFileSync(new URL(`../public/icons/icon${size}.png`, import.meta.url), png);
 }
 console.log("Icons generated.");
