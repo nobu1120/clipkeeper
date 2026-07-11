@@ -74,14 +74,6 @@ async function safeJson(res: Response): Promise<any> {
   }
 }
 
-function extractPlainTitle(titleProp: any): string {
-  if (!titleProp) return "Untitled";
-  if (Array.isArray(titleProp.title)) {
-    return titleProp.title.map((t: any) => t.plain_text).join("") || "Untitled";
-  }
-  return "Untitled";
-}
-
 function toPropertySummary(name: string, prop: any): NotionPropertySummary {
   const type = prop.type;
   const options =
@@ -271,5 +263,3 @@ export async function createPage(params: {
   const data = await res.json();
   return { pageUrl: data.url as string };
 }
-
-export { extractPlainTitle };

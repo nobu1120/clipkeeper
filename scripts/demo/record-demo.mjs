@@ -63,7 +63,7 @@ window.chrome = {
           ]);
         case "REGISTER_DATABASE":
           if (s.registeredDatabases.length >= 1) return Promise.resolve({ ok: false, message: "無料プランはデータベース1件までです。" });
-          s.registeredDatabases.push({ id: msg.database.id, title: msg.database.title, isDefaultForDomains: [], properties: msg.database.properties });
+          s.registeredDatabases.push({ id: msg.database.id, title: msg.database.title, properties: msg.database.properties });
           __writeState(s);
           return Promise.resolve({ ok: true });
         case "EXTRACT_CONTENT":

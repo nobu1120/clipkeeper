@@ -81,7 +81,7 @@ window.chrome = {
           ]);
         case "REGISTER_DATABASE":
           if (s.registeredDatabases.length >= 1) return Promise.resolve({ ok: false, message: "無料プランはデータベース1件までです。" });
-          s.registeredDatabases.push({ id: msg.database.id, connectionId: s.activeConnectionId, title: msg.database.title, isDefaultForDomains: [], properties: msg.database.properties });
+          s.registeredDatabases.push({ id: msg.database.id, connectionId: s.activeConnectionId, title: msg.database.title, properties: msg.database.properties });
           __writeState(s);
           return Promise.resolve({ ok: true });
         case "EXTRACT_CONTENT":
@@ -152,7 +152,6 @@ try {
         id: "db-1",
         connectionId: "conn-1",
         title: "Reading List",
-        isDefaultForDomains: [],
         properties: [
           { name: "Name", type: "title" },
           { name: "Tags", type: "multi_select", options: [{ id: "t1", name: "tech" }] },

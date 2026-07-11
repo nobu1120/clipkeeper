@@ -22,7 +22,7 @@ window.chrome = {
         case "GET_USAGE": return Promise.resolve({ periodStart: new Date().toISOString(), clipCount: 6 });
         case "GET_REGISTERED_DATABASES":
           return Promise.resolve([
-            { id: "db-1", title: "Reading List", isDefaultForDomains: [], properties: [
+            { id: "db-1", title: "Reading List", properties: [
               { name: "Name", type: "title" },
               { name: "Tags", type: "multi_select", options: [{ id: "t1", name: "tech" }, { id: "t2", name: "later" }] },
             ] },

@@ -97,7 +97,6 @@ export interface RegisteredDatabase {
   id: string;
   connectionId: string;
   title: string;
-  isDefaultForDomains: string[];
   properties: NotionPropertySummary[];
 }
 

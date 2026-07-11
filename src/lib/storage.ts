@@ -77,6 +77,29 @@ export async function incrementUsage(): Promise<UsageState> {
   return updated;
 }
 
+export async function decrementUsage(): Promise<UsageState> {
+  const usage = await getUsage();
+  const updated: UsageState = { ...usage, clipCount: Math.max(0, usage.clipCount - 1) };
+  await setLocal(KEYS.usage, updated);
+  return updated;
+}
+
+// The service worker is single-threaded, but an await inside a check-then-
+// write sequence (e.g. read usage, then later write it back) still lets a
+// second SAVE_CLIP message interleave and read the same stale count. Chain
+// every usage mutation through this queue so each one fully completes
+// before the next starts.
+let usageMutex: Promise<unknown> = Promise.resolve();
+
+export function withUsageLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = usageMutex.then(fn, fn);
+  usageMutex = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 export async function getPlan(): Promise<PlanState> {
   return getLocal(KEYS.plan, { tier: "free" });
 }

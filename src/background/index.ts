@@ -6,12 +6,17 @@ import {
   getPlan,
   getRegisteredDatabases,
   getUsage,
-  incrementUsage,
   setActiveConnectionId,
   setConnections,
   setRegisteredDatabases,
 } from "../lib/storage";
-import { checkClipQuota, checkDatabaseLimit, activateLicense, deactivateLicense } from "../lib/plan";
+import {
+  reserveClipQuota,
+  releaseClipQuota,
+  checkDatabaseLimit,
+  activateLicense,
+  deactivateLicense,
+} from "../lib/plan";
 import { createPage, friendlyNotionErrorMessage, listDatabases, testConnection } from "../lib/notion";
 import type {
   ExtensionMessage,
@@ -59,12 +64,8 @@ async function quickSaveFromContextMenu(
   tabId: number,
   kind: "EXTRACT_CONTENT" | "EXTRACT_SELECTION"
 ) {
+  let reserved = false;
   try {
-    const quota = await checkClipQuota();
-    if (!quota.allowed) {
-      notify("ClipKeep: 上限に達しました", quota.reason ?? "無料枠の上限です。");
-      return;
-    }
     const connection = await getActiveConnection();
     if (!connection) {
       notify("ClipKeep: 未接続です", "オプション画面でNotionと接続してください。");
@@ -76,6 +77,12 @@ async function quickSaveFromContextMenu(
       notify("ClipKeep: 保存先が未設定です", "オプション画面で保存先データベースを登録してください。");
       return;
     }
+    const quota = await reserveClipQuota();
+    if (!quota.allowed) {
+      notify("ClipKeep: 上限に達しました", quota.reason ?? "無料枠の上限です。");
+      return;
+    }
+    reserved = true;
     const content = await injectAndExtract(tabId, kind);
     const result = await createPage({
       token: connection.token,
@@ -85,10 +92,10 @@ async function quickSaveFromContextMenu(
       properties: [{ name: "Name", type: "title", value: content.title }],
       blocks: content.blocks,
     });
-    await incrementUsage();
     notify("ClipKeepに保存しました", content.title);
     void result;
   } catch (err) {
+    if (reserved) await releaseClipQuota();
     notify("ClipKeep: 保存に失敗しました", friendlyNotionErrorMessage((err as Error).message));
   }
 }
@@ -197,7 +204,6 @@ export async function handleMessage(message: ExtensionMessage): Promise<unknown>
               id: message.database.id,
               connectionId: connection.id,
               title: message.database.title,
-              isDefaultForDomains: [],
               properties: message.database.properties,
             },
           ];
@@ -212,20 +218,20 @@ export async function handleMessage(message: ExtensionMessage): Promise<unknown>
     }
 
     case "SAVE_CLIP": {
-      const quota = await checkClipQuota();
-      if (!quota.allowed) {
-        return {
-          ok: false,
-          errorCode: "QUOTA_EXCEEDED",
-          message: quota.reason ?? "無料枠の上限に達しました。",
-        } satisfies SaveClipResponse;
-      }
       const connection = await getActiveConnection();
       if (!connection) {
         return {
           ok: false,
           errorCode: "NOT_CONNECTED",
           message: "Notionと接続されていません。オプション画面で接続してください。",
+        } satisfies SaveClipResponse;
+      }
+      const quota = await reserveClipQuota();
+      if (!quota.allowed) {
+        return {
+          ok: false,
+          errorCode: "QUOTA_EXCEEDED",
+          message: quota.reason ?? "無料枠の上限に達しました。",
         } satisfies SaveClipResponse;
       }
       try {
@@ -237,9 +243,9 @@ export async function handleMessage(message: ExtensionMessage): Promise<unknown>
           properties: message.payload.properties,
           blocks: message.payload.blocks,
         });
-        await incrementUsage();
         return { ok: true, pageUrl: result.pageUrl } satisfies SaveClipResponse;
       } catch (err) {
+        await releaseClipQuota();
         return {
           ok: false,
           errorCode: "NOTION_API_ERROR",

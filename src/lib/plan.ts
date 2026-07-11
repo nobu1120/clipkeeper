@@ -1,5 +1,13 @@
 import { FREE_MAX_DATABASES, FREE_MONTHLY_CLIP_LIMIT } from "./types";
-import { getPlan, getRegisteredDatabases, getUsage, setPlan } from "./storage";
+import {
+  decrementUsage,
+  getPlan,
+  getRegisteredDatabases,
+  getUsage,
+  incrementUsage,
+  setPlan,
+  withUsageLock,
+} from "./storage";
 
 export interface QuotaCheck {
   allowed: boolean;
@@ -7,21 +15,34 @@ export interface QuotaCheck {
   remaining: number | "unlimited";
 }
 
-export async function checkClipQuota(): Promise<QuotaCheck> {
-  const plan = await getPlan();
-  if (plan.tier === "pro") {
-    return { allowed: true, remaining: "unlimited" };
-  }
-  const usage = await getUsage();
-  const remaining = FREE_MONTHLY_CLIP_LIMIT - usage.clipCount;
-  if (remaining <= 0) {
-    return {
-      allowed: false,
-      reason: `無料プランは月${FREE_MONTHLY_CLIP_LIMIT}件までです。Proにアップグレードすると無制限になります。`,
-      remaining: 0,
-    };
-  }
-  return { allowed: true, remaining };
+const QUOTA_EXCEEDED_REASON = `無料プランは月${FREE_MONTHLY_CLIP_LIMIT}件までです。Proにアップグレードすると無制限になります。`;
+
+// Checks the quota and, if allowed, immediately reserves a slot by
+// incrementing usage — as a single lock-guarded operation. A separate
+// check-then-later-increment (the previous approach) leaves a window where
+// two concurrent saves (e.g. context-menu + popup) can both pass the check
+// before either increments, letting usage exceed the free limit. Callers
+// must release the reservation via releaseClipQuota() if the save ends up
+// failing after this succeeds.
+export async function reserveClipQuota(): Promise<QuotaCheck> {
+  return withUsageLock(async () => {
+    const plan = await getPlan();
+    if (plan.tier === "pro") {
+      await incrementUsage();
+      return { allowed: true, remaining: "unlimited" };
+    }
+    const usage = await getUsage();
+    const remaining = FREE_MONTHLY_CLIP_LIMIT - usage.clipCount;
+    if (remaining <= 0) {
+      return { allowed: false, reason: QUOTA_EXCEEDED_REASON, remaining: 0 };
+    }
+    await incrementUsage();
+    return { allowed: true, remaining: remaining - 1 };
+  });
+}
+
+export async function releaseClipQuota(): Promise<void> {
+  await withUsageLock(() => decrementUsage());
 }
 
 export async function checkDatabaseLimit(): Promise<QuotaCheck> {

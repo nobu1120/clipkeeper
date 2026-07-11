@@ -196,6 +196,44 @@ const blocked = await handleMessage({
 assert.equal(blocked.ok, false);
 assert.equal(blocked.errorCode, "QUOTA_EXCEEDED");
 
+// --- Concurrency: two SAVE_CLIP calls fired simultaneously with exactly one
+// slot remaining must not both succeed. A separate check-then-later-
+// increment (the previous implementation) left a window where both could
+// read the same "1 remaining" count before either wrote back, letting usage
+// exceed the free limit. reserveClipQuota() must serialize check+increment
+// as one operation regardless of call order. ---
+const usageBeforeConcurrent = await handleMessage({ type: "GET_USAGE" });
+store.set("clipkeep.usage", { periodStart: usageBeforeConcurrent.periodStart, clipCount: 19 });
+const concurrentPayload = (label) => ({
+  type: "SAVE_CLIP",
+  payload: {
+    databaseId: "db-1",
+    title: `Concurrent ${label}`,
+    sourceUrl: `https://example.com/concurrent-${label}`,
+    properties: [{ name: "Name", type: "title", value: `Concurrent ${label}` }],
+    blocks: [],
+  },
+});
+const concurrentResults = await Promise.all([
+  handleMessage(concurrentPayload("A")),
+  handleMessage(concurrentPayload("B")),
+]);
+const concurrentSucceeded = concurrentResults.filter((r) => r.ok);
+const concurrentFailed = concurrentResults.filter((r) => !r.ok);
+assert.equal(
+  concurrentSucceeded.length,
+  1,
+  "exactly one of two concurrent saves at the quota boundary should succeed"
+);
+assert.equal(concurrentFailed.length, 1, "the other concurrent save should be quota-blocked");
+assert.equal(concurrentFailed[0].errorCode, "QUOTA_EXCEEDED");
+const usageAfterConcurrent = await handleMessage({ type: "GET_USAGE" });
+assert.equal(
+  usageAfterConcurrent.clipCount,
+  20,
+  "usage must not exceed the free limit even under concurrent saves"
+);
+
 // --- License activation lifts the quota ---
 const badLicense = await handleMessage({ type: "ACTIVATE_LICENSE", licenseKey: "not-a-real-key" });
 assert.equal(badLicense.ok, false, "malformed license key should be rejected");
@@ -223,7 +261,10 @@ assert.equal(unblockedAfterPro.ok, true, "Pro plan should bypass the free clip q
 
 // --- Saving into a Notion system collection (e.g. the "People" member
 // directory) surfaces Notion's raw error plus an actionable hint, instead
-// of just the bare validation message. ---
+// of just the bare validation message. It must also release the quota
+// slot it reserved before the failed save, so a rejected save doesn't
+// silently cost the user a clip. ---
+const usageBeforePeopleFailure = await handleMessage({ type: "GET_USAGE" });
 const peopleCollectionResult = await handleMessage({
   type: "SAVE_CLIP",
   payload: {
@@ -243,6 +284,12 @@ assert.ok(
 assert.ok(
   peopleCollectionResult.message.includes("別のデータベースを選び直してください"),
   "a friendly actionable hint should be appended for this error class"
+);
+const usageAfterPeopleFailure = await handleMessage({ type: "GET_USAGE" });
+assert.equal(
+  usageAfterPeopleFailure.clipCount,
+  usageBeforePeopleFailure.clipCount,
+  "a failed save must release its reserved quota slot, not consume it"
 );
 
 // Pro plan should also allow registering a second database now.
