@@ -72,6 +72,21 @@ export interface PlanState {
 export const FREE_MONTHLY_CLIP_LIMIT = 20;
 export const FREE_MAX_DATABASES = 1;
 
+// A single Notion workspace connection. Internal Integration Tokens are
+// inherently scoped to one workspace each (Notion has no "pick a workspace"
+// concept for this auth style, unlike OAuth) — so supporting multiple
+// workspaces means storing multiple named connections and letting the user
+// switch which one is active, rather than a single global token.
+export interface NotionConnection {
+  id: string;
+  token: string;
+  workspaceName: string | null;
+  connectedAt: string;
+}
+
+// Legacy single-connection shape, derived from whichever NotionConnection is
+// currently active. Kept so simple consumers (the popup) don't need to know
+// about multi-workspace management.
 export interface ConnectionState {
   token: string | null;
   connectedAt: string | null;
@@ -80,6 +95,7 @@ export interface ConnectionState {
 
 export interface RegisteredDatabase {
   id: string;
+  connectionId: string;
   title: string;
   isDefaultForDomains: string[];
   properties: NotionPropertySummary[];
@@ -93,9 +109,11 @@ export type ExtensionMessage =
   | { type: "SAVE_CLIP"; payload: SaveClipRequest }
   | { type: "GET_USAGE" }
   | { type: "GET_CONNECTION" }
+  | { type: "GET_CONNECTIONS" }
   | { type: "TEST_CONNECTION"; token: string }
-  | { type: "SET_CONNECTION"; token: string }
-  | { type: "DISCONNECT" }
+  | { type: "ADD_CONNECTION"; token: string }
+  | { type: "REMOVE_CONNECTION"; connectionId: string }
+  | { type: "SET_ACTIVE_CONNECTION"; connectionId: string }
   | { type: "REGISTER_DATABASE"; database: NotionDatabaseSummary }
   | { type: "UNREGISTER_DATABASE"; databaseId: string }
   | { type: "GET_REGISTERED_DATABASES" }

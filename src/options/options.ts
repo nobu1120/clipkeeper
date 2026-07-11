@@ -1,6 +1,6 @@
 import { sendMessage } from "../lib/messaging";
 import type {
-  ConnectionState,
+  NotionConnection,
   NotionDatabaseSummary,
   PlanState,
   RegisteredDatabase,
@@ -11,7 +11,8 @@ import { FREE_MAX_DATABASES, FREE_MONTHLY_CLIP_LIMIT } from "../lib/types";
 const app = document.getElementById("app")!;
 
 interface OptionsState {
-  connection: ConnectionState;
+  connections: NotionConnection[];
+  activeConnectionId: string | null;
   plan: PlanState;
   usage: UsageState;
   registered: RegisteredDatabase[];
@@ -22,22 +23,35 @@ interface OptionsState {
 
 let state: OptionsState;
 
-async function loadState(): Promise<void> {
-  const [connection, plan, usage, registered] = await Promise.all([
-    sendMessage<ConnectionState>({ type: "GET_CONNECTION" }),
-    sendMessage<PlanState>({ type: "GET_PLAN" }),
-    sendMessage<UsageState>({ type: "GET_USAGE" }),
+async function loadConnectionsState(): Promise<void> {
+  const [{ connections, activeConnectionId }, registered] = await Promise.all([
+    sendMessage<{ connections: NotionConnection[]; activeConnectionId: string | null }>({
+      type: "GET_CONNECTIONS",
+    }),
     sendMessage<RegisteredDatabase[]>({ type: "GET_REGISTERED_DATABASES" }),
   ]);
+  state.connections = connections;
+  state.activeConnectionId = activeConnectionId;
+  state.registered = registered;
+  state.availableDatabases = null;
+}
+
+async function loadState(): Promise<void> {
+  const [plan, usage] = await Promise.all([
+    sendMessage<PlanState>({ type: "GET_PLAN" }),
+    sendMessage<UsageState>({ type: "GET_USAGE" }),
+  ]);
   state = {
-    connection,
+    connections: [],
+    activeConnectionId: null,
     plan,
     usage,
-    registered,
+    registered: [],
     availableDatabases: null,
     banner: null,
     loadingDatabases: false,
   };
+  await loadConnectionsState();
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -61,7 +75,7 @@ function render(): void {
 
   app.append(renderConnectionSection());
   app.append(renderPlanSection());
-  if (state.connection.token) {
+  if (state.activeConnectionId) {
     app.append(renderDatabaseSection());
   }
 }
@@ -69,15 +83,30 @@ function render(): void {
 function renderConnectionSection(): HTMLElement {
   const section = el("section", {}, [el("h2", {}, ["Notion接続"])]);
 
-  if (state.connection.token) {
+  if (state.connections.length > 0) {
+    const list = el("ul", { class: "db-list" });
+    for (const conn of state.connections) {
+      const isActive = conn.id === state.activeConnectionId;
+      const label = conn.workspaceName ?? "(名称不明のワークスペース)";
+      const row = el("li", { class: "db-row" }, [
+        el("span", {}, [isActive ? `${label}（使用中）` : label]),
+      ]);
+      if (!isActive) {
+        const switchBtn = el("button", {}, ["これに切り替え"]);
+        switchBtn.addEventListener("click", () => void switchConnection(conn.id));
+        row.append(switchBtn);
+      }
+      const removeBtn = el("button", { class: "danger" }, ["解除"]);
+      removeBtn.addEventListener("click", () => void removeConnection(conn.id));
+      row.append(removeBtn);
+      list.append(row);
+    }
     section.append(
-      el("p", {}, [
-        `接続済み${state.connection.workspaceName ? `（${state.connection.workspaceName}）` : ""}`,
+      el("p", { class: "muted" }, [
+        "接続中のワークスペース(保存・データベース登録は「使用中」のワークスペースに対して行われます):",
       ]),
-      el("button", { class: "danger", id: "disconnect" }, ["接続を解除"])
+      list
     );
-    section.querySelector("#disconnect")!.addEventListener("click", () => void disconnect());
-    return section;
   }
 
   section.append(
@@ -91,8 +120,14 @@ function renderConnectionSection(): HTMLElement {
     el("p", { class: "muted" }, [
       "2. 保存したいNotionデータベースのページ右上「•••」→「Connections」から、作成したインテグレーションを接続してください。",
     ]),
+    el("p", { class: "muted" }, [
+      "複数のNotionワークスペース(アカウント)を使い分けたい場合は、ワークスペースごとにインテグレーションを作成し、",
+      "同じSecretの貼り付け操作を繰り返すことで、下の一覧に追加していけます。",
+    ]),
     el("input", { type: "password", id: "token-input", placeholder: "secret_... または ntn_..." }),
-    el("button", { class: "primary", id: "connect" }, ["接続する"])
+    el("button", { class: "primary", id: "connect" }, [
+      state.connections.length > 0 ? "別のワークスペースを追加" : "接続する",
+    ])
   );
   section.querySelector("#connect")!.addEventListener("click", () => void connect());
   return section;
@@ -139,18 +174,42 @@ function renderDatabaseSection(): HTMLElement {
   fetchBtn.addEventListener("click", () => void fetchDatabases());
 
   if (state.availableDatabases) {
-    const list = el("ul", { class: "db-list" });
-    const registeredIds = new Set(state.registered.map((d) => d.id));
-    for (const db of state.availableDatabases) {
-      const isRegistered = registeredIds.has(db.id);
-      const actionBtn = el("button", isRegistered ? {} : { class: "primary" }, [
-        isRegistered ? "登録済み" : "登録",
-      ]);
-      if (isRegistered) actionBtn.setAttribute("disabled", "true");
-      actionBtn.addEventListener("click", () => void registerDatabase(db));
-      list.append(el("li", { class: "db-row" }, [el("span", {}, [db.title]), actionBtn]));
+    if (state.availableDatabases.length === 0) {
+      section.append(
+        el("p", { class: "muted" }, [
+          "インテグレーションと接続済みのデータベースが見つかりませんでした。",
+          "Notionのデータベースページ右上「•••」→「Connections」から、このインテグレーションを接続してください。",
+        ])
+      );
+    } else {
+      const registeredIds = new Set(state.registered.map((d) => d.id));
+      const select = el("select", { id: "available-db-select" });
+      for (const db of state.availableDatabases) {
+        const isRegistered = registeredIds.has(db.id);
+        const opt = el("option", { value: db.id }, [isRegistered ? `${db.title}（登録済み）` : db.title]);
+        if (isRegistered) opt.setAttribute("disabled", "true");
+        select.append(opt);
+      }
+      const firstSelectable = state.availableDatabases.find((db) => !registeredIds.has(db.id));
+      if (firstSelectable) select.value = firstSelectable.id;
+
+      const registerBtn = el("button", { class: "primary", id: "register-selected-db" }, ["登録"]);
+      if (state.availableDatabases.every((db) => registeredIds.has(db.id))) {
+        registerBtn.setAttribute("disabled", "true");
+      }
+      registerBtn.addEventListener("click", () => {
+        const dbId = select.value;
+        const db = state.availableDatabases?.find((d) => d.id === dbId);
+        if (db) void registerDatabase(db);
+      });
+
+      section.append(
+        el("p", { class: "muted" }, [
+          `インテグレーションと接続済みのデータベース（${state.availableDatabases.length}件）:`,
+        ]),
+        el("div", { class: "row" }, [select, registerBtn])
+      );
     }
-    section.append(el("p", { class: "muted" }, ["インテグレーションと接続済みのデータベース:"]), list);
   }
 
   return section;
@@ -161,22 +220,28 @@ async function connect(): Promise<void> {
   const token = input.value.trim();
   if (!token) return;
   const result = await sendMessage<{ ok: boolean; message?: string }>({
-    type: "SET_CONNECTION",
+    type: "ADD_CONNECTION",
     token,
   });
   if (result.ok) {
-    state.connection = await sendMessage<ConnectionState>({ type: "GET_CONNECTION" });
-    state.banner = { kind: "success", text: "Notionと接続しました。" };
+    await loadConnectionsState();
+    state.banner = { kind: "success", text: "Notionワークスペースを接続しました。" };
   } else {
     state.banner = { kind: "error", text: result.message ?? "接続に失敗しました。" };
   }
   render();
 }
 
-async function disconnect(): Promise<void> {
-  await sendMessage({ type: "DISCONNECT" });
-  state.connection = { token: null, connectedAt: null, workspaceName: null };
-  state.availableDatabases = null;
+async function switchConnection(connectionId: string): Promise<void> {
+  await sendMessage({ type: "SET_ACTIVE_CONNECTION", connectionId });
+  await loadConnectionsState();
+  state.banner = { kind: "success", text: "使用するワークスペースを切り替えました。" };
+  render();
+}
+
+async function removeConnection(connectionId: string): Promise<void> {
+  await sendMessage({ type: "REMOVE_CONNECTION", connectionId });
+  await loadConnectionsState();
   state.banner = { kind: "success", text: "接続を解除しました。" };
   render();
 }

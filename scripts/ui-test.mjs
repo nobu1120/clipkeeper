@@ -15,16 +15,21 @@ const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: 
 // page.reload(), since evaluateOnNewDocument re-runs this script on every
 // navigation and would otherwise reset an in-memory variable each time.
 const MOCK_CHROME_SRC = `
-function __readState() {
-  const raw = sessionStorage.getItem("__mockState");
-  return raw ? JSON.parse(raw) : {
-    connection: { token: null, connectedAt: null, workspaceName: null },
+function __defaultState() {
+  return {
+    connections: [],
+    activeConnectionId: null,
     plan: { tier: "free" },
     usage: { periodStart: new Date().toISOString(), clipCount: 3 },
     registeredDatabases: [],
   };
 }
+function __readState() {
+  const raw = sessionStorage.getItem("__mockState");
+  return raw ? JSON.parse(raw) : __defaultState();
+}
 function __writeState(s) { sessionStorage.setItem("__mockState", JSON.stringify(s)); }
+function __activeConnection(s) { return s.connections.find((c) => c.id === s.activeConnectionId) ?? null; }
 
 window.chrome = {
   runtime: {
@@ -32,25 +37,51 @@ window.chrome = {
     sendMessage: (msg) => {
       const s = __readState();
       switch (msg.type) {
-        case "GET_CONNECTION": return Promise.resolve(s.connection);
+        case "GET_CONNECTION": {
+          const active = __activeConnection(s);
+          return Promise.resolve(
+            active
+              ? { token: active.token, connectedAt: active.connectedAt, workspaceName: active.workspaceName }
+              : { token: null, connectedAt: null, workspaceName: null }
+          );
+        }
+        case "GET_CONNECTIONS":
+          return Promise.resolve({ connections: s.connections, activeConnectionId: s.activeConnectionId });
         case "GET_PLAN": return Promise.resolve(s.plan);
         case "GET_USAGE": return Promise.resolve(s.usage);
-        case "GET_REGISTERED_DATABASES": return Promise.resolve(s.registeredDatabases);
-        case "SET_CONNECTION":
-          s.connection = { token: msg.token, connectedAt: new Date().toISOString(), workspaceName: "Mock WS" };
+        case "GET_REGISTERED_DATABASES":
+          return Promise.resolve(s.registeredDatabases.filter((d) => d.connectionId === s.activeConnectionId));
+        case "ADD_CONNECTION": {
+          const id = "conn-" + (s.connections.length + 1);
+          s.connections.push({
+            id,
+            token: msg.token,
+            workspaceName: "Mock WS " + (s.connections.length + 1),
+            connectedAt: new Date().toISOString(),
+          });
+          s.activeConnectionId = id;
           __writeState(s);
           return Promise.resolve({ ok: true });
-        case "DISCONNECT":
-          s.connection = { token: null, connectedAt: null, workspaceName: null };
+        }
+        case "REMOVE_CONNECTION": {
+          s.connections = s.connections.filter((c) => c.id !== msg.connectionId);
+          s.registeredDatabases = s.registeredDatabases.filter((d) => d.connectionId !== msg.connectionId);
+          if (s.activeConnectionId === msg.connectionId) s.activeConnectionId = s.connections[0]?.id ?? null;
           __writeState(s);
           return Promise.resolve({ ok: true });
+        }
+        case "SET_ACTIVE_CONNECTION": {
+          s.activeConnectionId = msg.connectionId;
+          __writeState(s);
+          return Promise.resolve({ ok: true });
+        }
         case "GET_DATABASES":
           return Promise.resolve([
             { id: "db-1", title: "Reading List", properties: [{ name: "Name", type: "title" }, { name: "Tags", type: "multi_select", options: [{id:"t1",name:"tech"}] }] },
           ]);
         case "REGISTER_DATABASE":
           if (s.registeredDatabases.length >= 1) return Promise.resolve({ ok: false, message: "無料プランはデータベース1件までです。" });
-          s.registeredDatabases.push({ id: msg.database.id, title: msg.database.title, isDefaultForDomains: [], properties: msg.database.properties });
+          s.registeredDatabases.push({ id: msg.database.id, connectionId: s.activeConnectionId, title: msg.database.title, isDefaultForDomains: [], properties: msg.database.properties });
           __writeState(s);
           return Promise.resolve({ ok: true });
         case "EXTRACT_CONTENT":
@@ -79,7 +110,8 @@ function setMockState(page, patch) {
     const s = raw
       ? JSON.parse(raw)
       : {
-          connection: { token: null, connectedAt: null, workspaceName: null },
+          connections: [],
+          activeConnectionId: null,
           plan: { tier: "free" },
           usage: { periodStart: new Date().toISOString(), clipCount: 3 },
           registeredDatabases: [],
@@ -104,7 +136,8 @@ try {
 
   // ---- Popup: connected, no databases registered ----
   await setMockState(popupPage, {
-    connection: { token: "good-token", connectedAt: "now", workspaceName: "Mock WS" },
+    connections: [{ id: "conn-1", token: "good-token", connectedAt: "now", workspaceName: "Mock WS" }],
+    activeConnectionId: "conn-1",
   });
   await popupPage.reload({ waitUntil: "networkidle0" });
   await new Promise((r) => setTimeout(r, 300));
@@ -117,6 +150,7 @@ try {
     registeredDatabases: [
       {
         id: "db-1",
+        connectionId: "conn-1",
         title: "Reading List",
         isDefaultForDomains: [],
         properties: [
@@ -181,13 +215,17 @@ try {
   text = await optionsPage.evaluate(() => document.body.innerText);
   assert.ok(text.includes("Reading List"), "fetched database list should include Reading List");
 
-  const registerButtons = await optionsPage.$$("button.primary");
-  const registerBtn = registerButtons[registerButtons.length - 1];
-  await registerBtn.click();
+  // Database selection is a dropdown (<select>), not a list of buttons.
+  const dbSelectOptions = await optionsPage.$$eval("#available-db-select option", (opts) =>
+    opts.map((o) => o.textContent)
+  );
+  assert.ok(dbSelectOptions.some((t) => t.includes("Reading List")), "the database dropdown should list Reading List");
+
+  await optionsPage.click("#register-selected-db");
   await new Promise((r) => setTimeout(r, 300));
   text = await optionsPage.evaluate(() => document.body.innerText);
   assert.ok(text.includes("登録しました"), "options should confirm database registration");
-  console.log("[options] register database OK");
+  console.log("[options] register database via dropdown OK");
 
   text = await optionsPage.evaluate(() => document.body.innerText);
   assert.ok(!text.includes("ライセンスキー"), "options page must not show any license/purchase UI (MVP is free-only)");
@@ -197,6 +235,29 @@ try {
     "license key input must not be present in the free-only MVP build"
   );
   console.log("[options] no Pro/license UI present OK");
+
+  // ---- Options page: connect a second Notion workspace and switch between them ----
+  await optionsPage.type("#token-input", "good-token-2");
+  await optionsPage.click("#connect");
+  await new Promise((r) => setTimeout(r, 300));
+  text = await optionsPage.evaluate(() => document.body.innerText);
+  assert.ok(text.includes("Mock WS 1") && text.includes("Mock WS 2"), "both connected workspaces should be listed");
+  assert.ok(text.includes("Mock WS 2（使用中）"), "the newly added second workspace should become active");
+  console.log("[options] add second workspace OK");
+
+  const switchClicked = await optionsPage.evaluate(() => {
+    const btn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent.includes("これに切り替え"));
+    if (!btn) return false;
+    btn.click();
+    return true;
+  });
+  assert.ok(switchClicked, "a switch-to-this-workspace button should be present for the inactive workspace");
+  await new Promise((r) => setTimeout(r, 300));
+  text = await optionsPage.evaluate(() => document.body.innerText);
+  assert.ok(text.includes("切り替えました"), "options should confirm the workspace switch");
+  assert.ok(text.includes("Mock WS 1（使用中）"), "switching back should make the first workspace active again");
+  assert.ok(text.includes("Reading List"), "switching back to the first workspace should restore its own registered database");
+  console.log("[options] switch workspace OK");
 
   await optionsPage.close();
 

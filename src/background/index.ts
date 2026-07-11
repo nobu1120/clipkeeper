@@ -1,15 +1,18 @@
 import {
-  clearConnection,
+  getActiveConnection,
+  getActiveConnectionId,
   getConnection,
+  getConnections,
   getPlan,
   getRegisteredDatabases,
   getUsage,
   incrementUsage,
-  setConnection,
+  setActiveConnectionId,
+  setConnections,
   setRegisteredDatabases,
 } from "../lib/storage";
 import { checkClipQuota, checkDatabaseLimit, activateLicense, deactivateLicense } from "../lib/plan";
-import { createPage, listDatabases, testConnection } from "../lib/notion";
+import { createPage, friendlyNotionErrorMessage, listDatabases, testConnection } from "../lib/notion";
 import type {
   ExtensionMessage,
   ExtractedContent,
@@ -62,12 +65,12 @@ async function quickSaveFromContextMenu(
       notify("ClipKeep: 上限に達しました", quota.reason ?? "無料枠の上限です。");
       return;
     }
-    const connection = await getConnection();
-    if (!connection.token) {
+    const connection = await getActiveConnection();
+    if (!connection) {
       notify("ClipKeep: 未接続です", "オプション画面でNotionと接続してください。");
       return;
     }
-    const databases = await getRegisteredDatabases();
+    const databases = await getRegisteredDatabases(connection.id);
     const target = databases[0];
     if (!target) {
       notify("ClipKeep: 保存先が未設定です", "オプション画面で保存先データベースを登録してください。");
@@ -86,7 +89,7 @@ async function quickSaveFromContextMenu(
     notify("ClipKeepに保存しました", content.title);
     void result;
   } catch (err) {
-    notify("ClipKeep: 保存に失敗しました", (err as Error).message);
+    notify("ClipKeep: 保存に失敗しました", friendlyNotionErrorMessage((err as Error).message));
   }
 }
 
@@ -111,36 +114,75 @@ export async function handleMessage(message: ExtensionMessage): Promise<unknown>
     case "GET_CONNECTION":
       return getConnection();
 
+    case "GET_CONNECTIONS": {
+      const [connections, activeConnectionId] = await Promise.all([
+        getConnections(),
+        getActiveConnectionId(),
+      ]);
+      return { connections, activeConnectionId };
+    }
+
     case "TEST_CONNECTION":
       return testConnection(message.token);
 
-    case "SET_CONNECTION": {
+    case "ADD_CONNECTION": {
       const test = await testConnection(message.token);
       if (!test.ok) {
         return { ok: false, message: test.message ?? "接続に失敗しました。" };
       }
-      await setConnection({
+      const connections = await getConnections();
+      if (connections.some((c) => c.token === message.token)) {
+        return { ok: false, message: "このワークスペースは既に接続済みです。" };
+      }
+      const newConnection = {
+        id: crypto.randomUUID(),
         token: message.token,
-        connectedAt: new Date().toISOString(),
         workspaceName: test.workspaceName ?? null,
-      });
+        connectedAt: new Date().toISOString(),
+      };
+      await setConnections([...connections, newConnection]);
+      await setActiveConnectionId(newConnection.id);
       return { ok: true };
     }
 
-    case "DISCONNECT":
-      await clearConnection();
+    case "REMOVE_CONNECTION": {
+      const [connections, activeConnectionId, databases] = await Promise.all([
+        getConnections(),
+        getActiveConnectionId(),
+        getRegisteredDatabases(),
+      ]);
+      const remaining = connections.filter((c) => c.id !== message.connectionId);
+      await setConnections(remaining);
+      await setRegisteredDatabases(databases.filter((d) => d.connectionId !== message.connectionId));
+      if (activeConnectionId === message.connectionId) {
+        await setActiveConnectionId(remaining[0]?.id ?? null);
+      }
       return { ok: true };
+    }
+
+    case "SET_ACTIVE_CONNECTION": {
+      const connections = await getConnections();
+      if (!connections.some((c) => c.id === message.connectionId)) {
+        return { ok: false, message: "指定されたワークスペースが見つかりません。" };
+      }
+      await setActiveConnectionId(message.connectionId);
+      return { ok: true };
+    }
 
     case "GET_DATABASES": {
-      const connection = await getConnection();
-      if (!connection.token) throw new Error("Notionと接続されていません。");
+      const connection = await getActiveConnection();
+      if (!connection) throw new Error("Notionと接続されていません。");
       return listDatabases(connection.token);
     }
 
-    case "GET_REGISTERED_DATABASES":
-      return getRegisteredDatabases();
+    case "GET_REGISTERED_DATABASES": {
+      const connection = await getActiveConnection();
+      return connection ? getRegisteredDatabases(connection.id) : [];
+    }
 
     case "REGISTER_DATABASE": {
+      const connection = await getActiveConnection();
+      if (!connection) return { ok: false, message: "Notionと接続されていません。" };
       const limit = await checkDatabaseLimit();
       const existing = await getRegisteredDatabases();
       const alreadyRegistered = existing.some((d) => d.id === message.database.id);
@@ -153,6 +195,7 @@ export async function handleMessage(message: ExtensionMessage): Promise<unknown>
             ...existing,
             {
               id: message.database.id,
+              connectionId: connection.id,
               title: message.database.title,
               isDefaultForDomains: [],
               properties: message.database.properties,
@@ -177,8 +220,8 @@ export async function handleMessage(message: ExtensionMessage): Promise<unknown>
           message: quota.reason ?? "無料枠の上限に達しました。",
         } satisfies SaveClipResponse;
       }
-      const connection = await getConnection();
-      if (!connection.token) {
+      const connection = await getActiveConnection();
+      if (!connection) {
         return {
           ok: false,
           errorCode: "NOT_CONNECTED",
@@ -200,7 +243,7 @@ export async function handleMessage(message: ExtensionMessage): Promise<unknown>
         return {
           ok: false,
           errorCode: "NOTION_API_ERROR",
-          message: (err as Error).message,
+          message: friendlyNotionErrorMessage((err as Error).message),
         } satisfies SaveClipResponse;
       }
     }

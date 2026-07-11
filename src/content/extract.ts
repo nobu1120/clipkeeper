@@ -1,6 +1,41 @@
 import { Readability } from "@mozilla/readability";
 import type { ExtractedContent, NotionBlockDraft } from "../lib/types";
 
+// Common attribute names lazy-loading libraries stash the real image URL in
+// before swapping it into `src` on scroll/JS execution. Readability has its
+// own lazy-image fixup, but it only recognizes values ending in
+// .jpg/.jpeg/.png/.webp — many real-world CDN URLs are extensionless or
+// query-string based (e.g. `?w=800`, `.avif`, `.gif`) and slip through, so
+// this is a broader belt-and-suspenders fallback run on whatever HTML
+// Readability hands back.
+const LAZY_SRC_ATTRS = ["data-src", "data-lazy-src", "data-original", "data-actualsrc", "data-hi-res-src"];
+
+function resolveImageUrl(img: HTMLImageElement): string | null {
+  const candidates: (string | null)[] = [img.getAttribute("src")];
+  for (const attr of LAZY_SRC_ATTRS) candidates.push(img.getAttribute(attr));
+
+  const srcset = img.getAttribute("srcset") ?? img.getAttribute("data-srcset");
+  if (srcset) {
+    // srcset is a comma-separated list of "<url> <descriptor>" pairs; take
+    // the first URL as a reasonable default.
+    candidates.push(srcset.split(",")[0]?.trim().split(/\s+/)[0] ?? null);
+  }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const trimmed = candidate.trim();
+    // Tiny inline placeholder images (1x1 base64 GIFs etc.) used by lazy-load
+    // libraries are never useful to save — skip and keep looking.
+    if (trimmed.startsWith("data:")) continue;
+    try {
+      return new URL(trimmed, document.baseURI).href;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 function htmlToBlocks(root: HTMLElement): NotionBlockDraft[] {
   const blocks: NotionBlockDraft[] = [];
 
@@ -49,8 +84,8 @@ function htmlToBlocks(root: HTMLElement): NotionBlockDraft[] {
           }
           break;
         case "img": {
-          const src = (child as HTMLImageElement).src;
-          if (src && src.startsWith("http")) blocks.push({ type: "image", url: src });
+          const url = resolveImageUrl(child as HTMLImageElement);
+          if (url) blocks.push({ type: "image", url });
           break;
         }
         case "p":

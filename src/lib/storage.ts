@@ -1,12 +1,14 @@
 import type {
   ConnectionState,
+  NotionConnection,
   PlanState,
   RegisteredDatabase,
   UsageState,
 } from "./types";
 
 const KEYS = {
-  connection: "clipkeep.connection",
+  connections: "clipkeep.connections",
+  activeConnectionId: "clipkeep.activeConnectionId",
   usage: "clipkeep.usage",
   plan: "clipkeep.plan",
   databases: "clipkeep.databases",
@@ -21,24 +23,32 @@ async function setLocal<T>(key: string, value: T): Promise<void> {
   await chrome.storage.local.set({ [key]: value });
 }
 
+export async function getConnections(): Promise<NotionConnection[]> {
+  return getLocal(KEYS.connections, []);
+}
+
+export async function setConnections(connections: NotionConnection[]): Promise<void> {
+  await setLocal(KEYS.connections, connections);
+}
+
+export async function getActiveConnectionId(): Promise<string | null> {
+  return getLocal<string | null>(KEYS.activeConnectionId, null);
+}
+
+export async function setActiveConnectionId(id: string | null): Promise<void> {
+  await setLocal(KEYS.activeConnectionId, id);
+}
+
+export async function getActiveConnection(): Promise<NotionConnection | null> {
+  const [connections, activeId] = await Promise.all([getConnections(), getActiveConnectionId()]);
+  return connections.find((c) => c.id === activeId) ?? connections[0] ?? null;
+}
+
 export async function getConnection(): Promise<ConnectionState> {
-  return getLocal(KEYS.connection, {
-    token: null,
-    connectedAt: null,
-    workspaceName: null,
-  });
-}
-
-export async function setConnection(state: ConnectionState): Promise<void> {
-  await setLocal(KEYS.connection, state);
-}
-
-export async function clearConnection(): Promise<void> {
-  await setLocal(KEYS.connection, {
-    token: null,
-    connectedAt: null,
-    workspaceName: null,
-  });
+  const active = await getActiveConnection();
+  return active
+    ? { token: active.token, connectedAt: active.connectedAt, workspaceName: active.workspaceName }
+    : { token: null, connectedAt: null, workspaceName: null };
 }
 
 function currentPeriodStart(): string {
@@ -75,8 +85,9 @@ export async function setPlan(plan: PlanState): Promise<void> {
   await setLocal(KEYS.plan, plan);
 }
 
-export async function getRegisteredDatabases(): Promise<RegisteredDatabase[]> {
-  return getLocal(KEYS.databases, []);
+export async function getRegisteredDatabases(connectionId?: string): Promise<RegisteredDatabase[]> {
+  const all = await getLocal<RegisteredDatabase[]>(KEYS.databases, []);
+  return connectionId ? all.filter((d) => d.connectionId === connectionId) : all;
 }
 
 export async function setRegisteredDatabases(

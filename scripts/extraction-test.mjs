@@ -45,6 +45,26 @@ try {
   const codeBlock = fullPageResult.blocks.find((b) => b.type === "code");
   assert.ok(codeBlock.text.includes("hello from code block"), "code block should retain code content");
 
+  // Regression guard: images must be extracted, including lazy-loaded ones
+  // that only carry the real URL in a data-src attribute (with a base64
+  // placeholder in `src` until JS swaps it in on scroll). This is an
+  // extremely common real-world pattern; previously only a plain `src`
+  // starting with "http" was recognized, silently dropping any lazy image.
+  const imageBlocks = fullPageResult.blocks.filter((b) => b.type === "image");
+  assert.equal(imageBlocks.length, 2, "expected both the normal and the lazy-loaded image to be extracted");
+  assert.ok(
+    imageBlocks.some((b) => b.url === "https://example.com/hero.jpg"),
+    "normal <img src> should be extracted as-is"
+  );
+  assert.ok(
+    imageBlocks.some((b) => b.url === "https://example.com/lazy-photo.jpg"),
+    "lazy-loaded image should resolve to the real data-src URL, not the base64 placeholder"
+  );
+  assert.ok(
+    !imageBlocks.some((b) => b.url.startsWith("data:")),
+    "a data: URI placeholder must never be saved as the image URL"
+  );
+
   // Selection extraction
   await page.evaluate(() => {
     const p = document.querySelector("main p");

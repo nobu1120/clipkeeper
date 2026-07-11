@@ -49,6 +49,23 @@ export async function testConnection(token: string): Promise<{
   }
 }
 
+// Some Notion databases returned by /v1/search aren't ordinary
+// user-created content databases — e.g. the auto-generated Teamspace
+// "People" member directory is structurally a `database` object but
+// Notion rejects creating ordinary pages/blocks under it. Recognize that
+// class of validation error and append an actionable hint, since Notion's
+// raw message alone doesn't explain what to do about it.
+export function friendlyNotionErrorMessage(raw: string): string {
+  if (/cannot be parented to the .+ collection record/i.test(raw)) {
+    return (
+      `${raw}\n\n選択したデータベースは、Notionが自動生成する「People」（ワークスペースメンバー一覧）` +
+      "のようなシステム管理用コレクションの可能性があります。通常のページを保存できないため、" +
+      "オプション画面で別のデータベースを選び直してください。"
+    );
+  }
+  return raw;
+}
+
 async function safeJson(res: Response): Promise<any> {
   try {
     return await res.json();
@@ -79,31 +96,66 @@ function toPropertySummary(name: string, prop: any): NotionPropertySummary {
 export async function listDatabases(
   token: string
 ): Promise<NotionDatabaseSummary[]> {
-  const res = await fetch(`${NOTION_API_BASE}/search`, {
-    method: "POST",
-    headers: headers(token),
-    body: JSON.stringify({
-      filter: { property: "object", value: "database" },
-      page_size: 50,
-    }),
-  });
-  if (!res.ok) {
-    const body = await safeJson(res);
-    throw new NotionApiError(
-      body?.message ?? `データベース一覧の取得に失敗しました (HTTP ${res.status})`,
-      res.status
-    );
+  const results: any[] = [];
+  let startCursor: string | undefined;
+
+  // Notion's /v1/search paginates at 100 results max per request. A fixed
+  // single request (previously capped at page_size: 50) silently dropped
+  // any databases beyond the first page for integrations connected to many
+  // databases. Follow has_more/next_cursor until every page is fetched.
+  for (;;) {
+    const res = await fetch(`${NOTION_API_BASE}/search`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify({
+        filter: { property: "object", value: "database" },
+        page_size: 100,
+        ...(startCursor ? { start_cursor: startCursor } : {}),
+      }),
+    });
+    if (!res.ok) {
+      const body = await safeJson(res);
+      throw new NotionApiError(
+        body?.message ?? `データベース一覧の取得に失敗しました (HTTP ${res.status})`,
+        res.status
+      );
+    }
+    const data = await res.json();
+    results.push(...(data.results as any[]));
+    if (!data.has_more || !data.next_cursor) break;
+    startCursor = data.next_cursor as string;
   }
-  const data = await res.json();
-  return (data.results as any[]).map((db) => ({
-    id: db.id,
-    title: Array.isArray(db.title)
-      ? db.title.map((t: any) => t.plain_text).join("") || "Untitled"
-      : "Untitled",
-    properties: Object.entries(db.properties ?? {}).map(([name, prop]) =>
-      toPropertySummary(name, prop)
-    ),
-  }));
+
+  return results
+    .map((db) => ({
+      id: db.id,
+      title: Array.isArray(db.title)
+        ? db.title.map((t: any) => t.plain_text).join("") || "Untitled"
+        : "Untitled",
+      properties: Object.entries(db.properties ?? {}).map(([name, prop]) =>
+        toPropertySummary(name, prop)
+      ),
+    }))
+    .filter((db) => !isNotionSystemCollection(db.title));
+}
+
+// Notion auto-generates certain database-shaped objects that /v1/search
+// returns alongside real, user-created databases — most notably the
+// Teamspace "People" member directory. These look like ordinary databases
+// but reject page creation with a Notion-side validation error ("cannot be
+// parented to the ... collection record"), so they're never a valid save
+// destination. Filter them out by their fixed, Notion-assigned title so
+// they never show up as a choice in the first place.
+//
+// This is a title-match heuristic, not a definitive API flag (Notion's
+// search API doesn't expose one) — a workspace with its own legitimately
+// named "People" database would also be hidden. That tradeoff is
+// intentional: showing a database that reliably fails to save is worse
+// than hiding one exact-name edge case.
+const NOTION_SYSTEM_COLLECTION_TITLES = new Set(["People"]);
+
+function isNotionSystemCollection(title: string): boolean {
+  return NOTION_SYSTEM_COLLECTION_TITLES.has(title);
 }
 
 function blockToNotion(block: NotionBlockDraft): any {

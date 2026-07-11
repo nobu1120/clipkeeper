@@ -75,7 +75,8 @@ p {
 }
 
 input[type="text"],
-input[type="password"] {
+input[type="password"],
+select {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -84,6 +85,17 @@ input[type="password"] {
   color: var(--fg);
   font-size: 13px;
   margin-bottom: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.row select {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 button {
