@@ -292,6 +292,66 @@ assert.equal(
   "a failed save must release its reserved quota slot, not consume it"
 );
 
+// --- Property auto-mapping: a "date"-type property must translate to
+// Notion's { date: { start } } shape (previously unsupported — only
+// title/rich_text/url/select/multi_select were handled). ---
+const dateSaveResult = await handleMessage({
+  type: "SAVE_CLIP",
+  payload: {
+    databaseId: "db-1",
+    title: "Dated Clip",
+    sourceUrl: "https://example.com/dated",
+    properties: [
+      { name: "Name", type: "title", value: "Dated Clip" },
+      { name: "Published", type: "date", value: "2026-07-01" },
+    ],
+    blocks: [],
+  },
+});
+assert.equal(dateSaveResult.ok, true, "save with a date property should succeed");
+const dateSaveBody = JSON.parse(fetchCalls[fetchCalls.length - 1].init.body);
+assert.deepEqual(
+  dateSaveBody.properties.Published,
+  { date: { start: "2026-07-01" } },
+  "a date-type property should translate to Notion's { date: { start } } shape"
+);
+
+// --- Domain-remembered database: GET_REMEMBERED_DATABASE / REMEMBER_DATABASE
+// round-trip, so quick-save and the popup can default to the database a
+// given site's clips were last saved to instead of always the first
+// registered one. ---
+const noMemoryYet = await handleMessage({ type: "GET_REMEMBERED_DATABASE", hostname: "example.com" });
+assert.equal(noMemoryYet.databaseId, null, "no database should be remembered for a domain never saved to");
+
+const remember = await handleMessage({ type: "REMEMBER_DATABASE", hostname: "example.com", databaseId: "db-1" });
+assert.equal(remember.ok, true);
+
+const remembered = await handleMessage({ type: "GET_REMEMBERED_DATABASE", hostname: "example.com" });
+assert.equal(remembered.databaseId, "db-1", "the remembered database should be returned for the same hostname");
+
+const rememberedForOtherHost = await handleMessage({
+  type: "GET_REMEMBERED_DATABASE",
+  hostname: "other-site.example",
+});
+assert.equal(
+  rememberedForOtherHost.databaseId,
+  null,
+  "a different hostname must not share another domain's remembered database"
+);
+
+const rememberStale = await handleMessage({
+  type: "REMEMBER_DATABASE",
+  hostname: "stale.example",
+  databaseId: "db-does-not-exist",
+});
+assert.equal(rememberStale.ok, true);
+const staleLookup = await handleMessage({ type: "GET_REMEMBERED_DATABASE", hostname: "stale.example" });
+assert.equal(
+  staleLookup.databaseId,
+  null,
+  "a remembered database id that's no longer registered should be ignored, not returned"
+);
+
 // Pro plan should also allow registering a second database now.
 const reg2AfterPro = await handleMessage({ type: "REGISTER_DATABASE", database: dbs[1] });
 assert.equal(reg2AfterPro.ok, true, "Pro plan should allow a second database");

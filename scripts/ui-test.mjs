@@ -22,6 +22,8 @@ function __defaultState() {
     plan: { tier: "free" },
     usage: { periodStart: new Date().toISOString(), clipCount: 3 },
     registeredDatabases: [],
+    domainDatabases: {},
+    currentTabUrl: "https://example.com/mock-article",
   };
 }
 function __readState() {
@@ -32,6 +34,9 @@ function __writeState(s) { sessionStorage.setItem("__mockState", JSON.stringify(
 function __activeConnection(s) { return s.connections.find((c) => c.id === s.activeConnectionId) ?? null; }
 
 window.chrome = {
+  tabs: {
+    query: () => Promise.resolve([{ url: __readState().currentTabUrl }]),
+  },
   runtime: {
     openOptionsPage: () => { window.__openOptionsCalled = true; },
     sendMessage: (msg) => {
@@ -85,7 +90,25 @@ window.chrome = {
           __writeState(s);
           return Promise.resolve({ ok: true });
         case "EXTRACT_CONTENT":
-          return Promise.resolve({ title: "モック記事タイトル", url: "https://example.com/mock", siteName: null, excerpt: null, blocks: [{ type: "paragraph", text: "モック本文" }] });
+          return Promise.resolve({
+            title: "モック記事タイトル",
+            url: "https://example.com/mock",
+            siteName: "モックサイト",
+            excerpt: null,
+            byline: "モック太郎",
+            publishedTime: "2026-07-05T00:00:00.000Z",
+            blocks: [{ type: "paragraph", text: "モック本文" }],
+          });
+        case "GET_REMEMBERED_DATABASE": {
+          const databaseId = s.domainDatabases[msg.hostname];
+          if (!databaseId) return Promise.resolve({ databaseId: null });
+          const activeRegistered = s.registeredDatabases.filter((d) => d.connectionId === s.activeConnectionId);
+          return Promise.resolve({ databaseId: activeRegistered.some((d) => d.id === databaseId) ? databaseId : null });
+        }
+        case "REMEMBER_DATABASE":
+          s.domainDatabases[msg.hostname] = msg.databaseId;
+          __writeState(s);
+          return Promise.resolve({ ok: true });
         case "SAVE_CLIP":
           s.usage.clipCount += 1;
           __writeState(s);
@@ -115,6 +138,8 @@ function setMockState(page, patch) {
           plan: { tier: "free" },
           usage: { periodStart: new Date().toISOString(), clipCount: 3 },
           registeredDatabases: [],
+          domainDatabases: {},
+          currentTabUrl: "https://example.com/mock-article",
         };
     Object.assign(s, JSON.parse(patchJson));
     sessionStorage.setItem("__mockState", JSON.stringify(s));
@@ -155,6 +180,8 @@ try {
         properties: [
           { name: "Name", type: "title" },
           { name: "Tags", type: "multi_select", options: [{ id: "t1", name: "tech" }] },
+          { name: "著者", type: "rich_text" },
+          { name: "公開日", type: "date" },
         ],
       },
     ],
@@ -167,6 +194,15 @@ try {
   assert.ok(text.includes("Reading List"), "clip form should show the registered database");
   const titleValue = await popupPage.$eval("#title-input", (el) => el.value);
   assert.equal(titleValue, "モック記事タイトル", "title field should be pre-filled from extraction");
+
+  // Property auto-mapping: a rich_text property whose name matches an
+  // "author"-ish pattern should be pre-filled from the extracted byline, and
+  // a date property should be pre-filled (as YYYY-MM-DD) from publishedTime.
+  const authorValue = await popupPage.$eval('input[data-prop-name="著者"]', (el) => el.value);
+  assert.equal(authorValue, "モック太郎", "author-ish rich_text property should auto-fill from the extracted byline");
+  const dateValue = await popupPage.$eval('input[data-prop-name="公開日"]', (el) => el.value);
+  assert.equal(dateValue, "2026-07-05", "date property should auto-fill (as YYYY-MM-DD) from the extracted publishedTime");
+  console.log("[popup] property auto-mapping OK");
 
   // select the "tech" tag option before saving
   const tagClicked = await popupPage.evaluate(() => {
@@ -184,6 +220,35 @@ try {
   text = await popupPage.evaluate(() => document.body.innerText);
   assert.ok(text.includes("保存しました"), "popup should show success banner after save");
   console.log("[popup] extract -> tag -> save flow OK");
+
+  // ---- Popup: domain-remembered database defaults to the last one used on
+  // this site, not always the first registered database (this is exactly
+  // the "doesn't remember the last database" complaint about Notion's own
+  // official web clipper). ----
+  await setMockState(popupPage, {
+    registeredDatabases: [
+      { id: "db-1", connectionId: "conn-1", title: "Reading List", properties: [{ name: "Name", type: "title" }] },
+      { id: "db-2", connectionId: "conn-1", title: "Archive", properties: [{ name: "Name", type: "title" }] },
+    ],
+  });
+  await popupPage.reload({ waitUntil: "networkidle0" });
+  await new Promise((r) => setTimeout(r, 300));
+  await popupPage.click("#extract-page");
+  await new Promise((r) => setTimeout(r, 300));
+
+  await popupPage.select("#db-select", "db-2");
+  await popupPage.click("#save-clip");
+  await new Promise((r) => setTimeout(r, 400));
+  text = await popupPage.evaluate(() => document.body.innerText);
+  assert.ok(text.includes("保存しました"), "save with the switched-to database should succeed");
+
+  await popupPage.reload({ waitUntil: "networkidle0" });
+  await new Promise((r) => setTimeout(r, 300));
+  await popupPage.click("#extract-page");
+  await new Promise((r) => setTimeout(r, 300));
+  const selectedDbId = await popupPage.$eval("#db-select", (el) => el.value);
+  assert.equal(selectedDbId, "db-2", "popup should default to the database this site's clips were last saved to");
+  console.log("[popup] domain-remembered database OK");
 
   await popupPage.close();
 

@@ -245,6 +245,33 @@ blocker級として指摘したため、[`src/options/options.ts`](src/options/o
     外側にchromeが無い、または本文自体が非常にリンク密度の高い構造のポータルページでは、
     引き続き理想的な抽出ができない可能性があります。
 
+### 3-12. 競合調査を踏まえた差別化機能の追加（2026-07-13）
+
+Notion公式Web Clipper（★3.3、テンプレート無し・保存時のプロパティ編集無し・前回使った
+データベースを覚えない、という不満が多い）および競合の「Save to Notion」「Copy to Notion」
+との比較調査を行い、指摘の多かった2点に対応しました。
+
+- **ドメインごとのデータベース記憶**: [`src/lib/storage.ts`](src/lib/storage.ts)に
+  `clipkeep.domainDatabases`（ホスト名→データベースID）を追加。ポップアップでの保存時・
+  右クリックのクイック保存時の両方で、そのサイトに前回保存したデータベースを自動的に
+  デフォルト選択するようにしました（`GET_REMEMBERED_DATABASE`/`REMEMBER_DATABASE`
+  メッセージを追加）。記憶されたIDが現在のワークスペースで登録解除・非対象になっていた
+  場合は無視して従来通り先頭のデータベースにフォールバックします。
+- **保存時のプロパティ自動マッピング**: Readabilityが元々抽出している`byline`（著者）・
+  `publishedTime`（公開日時）を[`src/content/extract.ts`](src/content/extract.ts)で
+  `ExtractedContent`に含めるようにし、[`src/popup/popup.ts`](src/popup/popup.ts)の
+  `autoMapProperties()`で、選択中データベースのプロパティ名から「著者」「日付」
+  「出典」等らしきものを推測して自動入力します（`rich_text`/`url`/`date`型プロパティの
+  入力欄を新規追加）。[`src/lib/notion.ts`](src/lib/notion.ts)にはNotion未対応だった
+  `date`型プロパティのマッピング（`{ date: { start } }`）を追加しました。あくまで
+  プロパティ名によるベストエフォートのヒューリスティックであり、ユーザーは保存前に
+  自由に上書き・削除できます。
+- [`scripts/logic-test.mjs`](scripts/logic-test.mjs)・[`scripts/ui-test.mjs`](scripts/ui-test.mjs)・
+  [`scripts/extraction-test.mjs`](scripts/extraction-test.mjs)に、両機能の回帰テストを
+  追加済みです（date型プロパティの保存形状、ドメイン記憶の記録・呼び出し・失効時の
+  フォールバック、ポップアップでの自動入力プレフィル、2つ目のデータベースへの
+  切り替え後にそちらが記憶されることを検証）。
+
 ## 4. 承認事項（外部公開の直前で停止中）
 
 3体のレビュアーによる外部監査（2026-07-10実施）で指摘されたブロッカーのうち、コード修正で

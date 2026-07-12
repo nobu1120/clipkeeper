@@ -3,6 +3,8 @@ export interface ExtractedContent {
   url: string;
   siteName: string | null;
   excerpt: string | null;
+  byline: string | null;
+  publishedTime: string | null;
   blocks: NotionBlockDraft[];
 }
 
@@ -116,6 +118,8 @@ export type ExtensionMessage =
   | { type: "REGISTER_DATABASE"; database: NotionDatabaseSummary }
   | { type: "UNREGISTER_DATABASE"; databaseId: string }
   | { type: "GET_REGISTERED_DATABASES" }
+  | { type: "GET_REMEMBERED_DATABASE"; hostname: string }
+  | { type: "REMEMBER_DATABASE"; hostname: string; databaseId: string }
   | { type: "GET_PLAN" }
   | { type: "ACTIVATE_LICENSE"; licenseKey: string }
   | { type: "DEACTIVATE_LICENSE" };

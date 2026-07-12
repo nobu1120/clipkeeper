@@ -157,6 +157,8 @@ export function extractFullPage(): ExtractedContent {
       url: location.href,
       siteName: null,
       excerpt: null,
+      byline: null,
+      publishedTime: null,
       blocks: [{ type: "paragraph", text: "(本文を自動抽出できませんでした)" }],
     };
   }
@@ -173,6 +175,8 @@ export function extractFullPage(): ExtractedContent {
     url: location.href,
     siteName: article.siteName ?? null,
     excerpt: article.excerpt ?? null,
+    byline: article.byline || null,
+    publishedTime: article.publishedTime || null,
     blocks: blocks.length > 0 ? blocks : [{ type: "paragraph", text: article.textContent.slice(0, 500) }],
   };
 }
@@ -185,6 +189,8 @@ export function extractSelection(): ExtractedContent {
     url: location.href,
     siteName: null,
     excerpt: text.slice(0, 200),
+    byline: null,
+    publishedTime: null,
     blocks: text
       ? [{ type: "quote", text }]
       : [{ type: "paragraph", text: "(選択されたテキストがありません)" }],

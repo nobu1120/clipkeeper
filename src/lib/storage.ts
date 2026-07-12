@@ -12,6 +12,7 @@ const KEYS = {
   usage: "clipkeep.usage",
   plan: "clipkeep.plan",
   databases: "clipkeep.databases",
+  domainDatabases: "clipkeep.domainDatabases",
 } as const;
 
 async function getLocal<T>(key: string, fallback: T): Promise<T> {
@@ -117,4 +118,19 @@ export async function setRegisteredDatabases(
   databases: RegisteredDatabase[]
 ): Promise<void> {
   await setLocal(KEYS.databases, databases);
+}
+
+// Remembers which registered database a given site's clips were last saved
+// to, so quick-save and the popup can default to it instead of always
+// falling back to the first registered database. Keyed by hostname only
+// (not per-connection): if the remembered id isn't among the active
+// connection's currently registered databases (e.g. after a workspace
+// switch or unregistering it), callers should ignore it and fall back.
+export async function getDomainDatabaseMap(): Promise<Record<string, string>> {
+  return getLocal<Record<string, string>>(KEYS.domainDatabases, {});
+}
+
+export async function setDomainDatabase(hostname: string, databaseId: string): Promise<void> {
+  const map = await getDomainDatabaseMap();
+  await setLocal(KEYS.domainDatabases, { ...map, [hostname]: databaseId });
 }

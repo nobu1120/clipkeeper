@@ -198,6 +198,8 @@ function propertyValueToNotion(prop: ClipRequestPropertyValue): any {
       return { rich_text: [{ type: "text", text: { content: String(prop.value) } }] };
     case "url":
       return { url: String(prop.value) };
+    case "date":
+      return prop.value ? { date: { start: String(prop.value) } } : { date: null };
     case "select":
       return prop.value ? { select: { name: String(prop.value) } } : { select: null };
     case "multi_select":

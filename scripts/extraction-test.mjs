@@ -25,6 +25,18 @@ try {
   assert.equal(fullPageResult.title, "テスト記事タイトル", "title should come from Readability's article title");
   assert.ok(!JSON.stringify(fullPageResult.blocks).includes("フッター"), "footer chrome should be excluded");
 
+  // Metadata used by the popup's property auto-mapping (author/date/source
+  // property pre-fill) must actually be surfaced on the extraction result —
+  // Readability parses these from <meta> tags but they were previously
+  // discarded entirely.
+  assert.equal(fullPageResult.siteName, "ClipKeepテストサイト", "siteName should come from og:site_name");
+  assert.equal(fullPageResult.byline, "ClipKeep 太郎", "byline should come from the author meta tag");
+  assert.equal(
+    fullPageResult.publishedTime,
+    "2026-07-01T09:00:00.000Z",
+    "publishedTime should come from the article:published_time meta tag"
+  );
+
   // Regression guard for a real bug found via live QA on Yahoo! JAPAN's
   // portal homepage: a link-heavy <header> sitting outside <main> (a common
   // real-world pattern for site-wide navigation menus) got picked up as the
@@ -91,6 +103,8 @@ try {
   console.log("extractSelection() ->", JSON.stringify(selectionResult));
   assert.equal(selectionResult.blocks[0].type, "quote");
   assert.ok(selectionResult.blocks[0].text.includes("ClipKeepの本文抽出ロジックを検証"));
+  assert.equal(selectionResult.byline, null, "selection extraction has no article metadata to draw a byline from");
+  assert.equal(selectionResult.publishedTime, null, "selection extraction has no article metadata to draw a date from");
 
   console.log("\nEXTRACTION TEST PASSED");
 } finally {

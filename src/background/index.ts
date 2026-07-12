@@ -3,11 +3,13 @@ import {
   getActiveConnectionId,
   getConnection,
   getConnections,
+  getDomainDatabaseMap,
   getPlan,
   getRegisteredDatabases,
   getUsage,
   setActiveConnectionId,
   setConnections,
+  setDomainDatabase,
   setRegisteredDatabases,
 } from "../lib/storage";
 import {
@@ -60,6 +62,15 @@ function notify(title: string, message: string) {
   });
 }
 
+function safeHostname(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
 async function quickSaveFromContextMenu(
   tabId: number,
   kind: "EXTRACT_CONTENT" | "EXTRACT_SELECTION"
@@ -72,11 +83,15 @@ async function quickSaveFromContextMenu(
       return;
     }
     const databases = await getRegisteredDatabases(connection.id);
-    const target = databases[0];
-    if (!target) {
+    if (databases.length === 0) {
       notify("ClipKeep: 保存先が未設定です", "オプション画面で保存先データベースを登録してください。");
       return;
     }
+    const tab = await chrome.tabs.get(tabId);
+    const hostname = safeHostname(tab.url);
+    const rememberedId = hostname ? (await getDomainDatabaseMap())[hostname] : undefined;
+    const target = databases.find((d) => d.id === rememberedId) ?? databases[0];
+
     const quota = await reserveClipQuota();
     if (!quota.allowed) {
       notify("ClipKeep: 上限に達しました", quota.reason ?? "無料枠の上限です。");
@@ -92,6 +107,7 @@ async function quickSaveFromContextMenu(
       properties: [{ name: "Name", type: "title", value: content.title }],
       blocks: content.blocks,
     });
+    if (hostname) await setDomainDatabase(hostname, target.id);
     notify("ClipKeepに保存しました", content.title);
     void result;
   } catch (err) {
@@ -185,6 +201,19 @@ export async function handleMessage(message: ExtensionMessage): Promise<unknown>
     case "GET_REGISTERED_DATABASES": {
       const connection = await getActiveConnection();
       return connection ? getRegisteredDatabases(connection.id) : [];
+    }
+
+    case "GET_REMEMBERED_DATABASE": {
+      const databaseId = (await getDomainDatabaseMap())[message.hostname];
+      if (!databaseId) return { databaseId: null };
+      const connection = await getActiveConnection();
+      const registered = connection ? await getRegisteredDatabases(connection.id) : [];
+      return { databaseId: registered.some((d) => d.id === databaseId) ? databaseId : null };
+    }
+
+    case "REMEMBER_DATABASE": {
+      await setDomainDatabase(message.hostname, message.databaseId);
+      return { ok: true };
     }
 
     case "REGISTER_DATABASE": {

@@ -19,6 +19,7 @@ interface PopupState {
   usage: UsageState;
   databases: RegisteredDatabase[];
   selectedDatabaseId: string | null;
+  hostname: string | null;
   extracted: ExtractedContent | null;
   extractMode: "EXTRACT_CONTENT" | "EXTRACT_SELECTION";
   title: string;
@@ -29,19 +30,45 @@ interface PopupState {
 
 let state: PopupState;
 
+async function currentTabHostname(): Promise<string | null> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url) return null;
+  try {
+    return new URL(tab.url).hostname;
+  } catch {
+    return null;
+  }
+}
+
 async function loadState(): Promise<void> {
-  const [connection, plan, usage, databases] = await Promise.all([
+  const [connection, plan, usage, databases, hostname] = await Promise.all([
     sendMessage<ConnectionState>({ type: "GET_CONNECTION" }),
     sendMessage<PlanState>({ type: "GET_PLAN" }),
     sendMessage<UsageState>({ type: "GET_USAGE" }),
     sendMessage<RegisteredDatabase[]>({ type: "GET_REGISTERED_DATABASES" }),
+    currentTabHostname(),
   ]);
+
+  // Default to whichever database this site's clips were saved to last time
+  // (if it's still registered), instead of always the first registered one —
+  // this is exactly the "doesn't remember the last database" complaint users
+  // have about Notion's own official web clipper.
+  let selectedDatabaseId = databases[0]?.id ?? null;
+  if (hostname && databases.length > 0) {
+    const remembered = await sendMessage<{ databaseId: string | null }>({
+      type: "GET_REMEMBERED_DATABASE",
+      hostname,
+    });
+    if (remembered.databaseId) selectedDatabaseId = remembered.databaseId;
+  }
+
   state = {
     connection,
     plan,
     usage,
     databases,
-    selectedDatabaseId: databases[0]?.id ?? null,
+    selectedDatabaseId,
+    hostname,
     extracted: null,
     extractMode: "EXTRACT_CONTENT",
     title: "",
@@ -133,6 +160,7 @@ async function runExtract(mode: "EXTRACT_CONTENT" | "EXTRACT_SELECTION"): Promis
     state.extractMode = mode;
     state.title = extracted.title;
     state.result = null;
+    autoMapProperties();
     render();
   } catch (err) {
     state.result = { ok: false, errorCode: "UNKNOWN", message: (err as Error).message };
@@ -142,6 +170,38 @@ async function runExtract(mode: "EXTRACT_CONTENT" | "EXTRACT_SELECTION"): Promis
 
 function selectedDatabase(): RegisteredDatabase | undefined {
   return state.databases.find((d) => d.id === state.selectedDatabaseId);
+}
+
+function toDateInputValue(iso: string): string {
+  const match = iso.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
+// Pre-fills date/author/source-ish properties from page metadata Readability
+// already extracts (byline, publishedTime, siteName), the way "Save to
+// Notion" auto-maps metadata into database properties — Notion's own
+// official clipper does none of this. Best-effort name matching only; never
+// overwrites a value the user (or a previous auto-map pass) already set.
+const AUTHOR_NAME_PATTERN = /author|byline|著者|執筆者|筆者/i;
+const SOURCE_NAME_PATTERN = /source|site|サイト|出典|媒体/i;
+const URL_NAME_PATTERN = /url|link|リンク/i;
+
+function autoMapProperties(): void {
+  const db = selectedDatabase();
+  if (!db || !state.extracted) return;
+  for (const prop of db.properties) {
+    if (state.propertyValues[prop.name] !== undefined) continue;
+    if (prop.type === "date" && state.extracted.publishedTime) {
+      const dateValue = toDateInputValue(state.extracted.publishedTime);
+      if (dateValue) state.propertyValues[prop.name] = dateValue;
+    } else if (prop.type === "rich_text" && AUTHOR_NAME_PATTERN.test(prop.name) && state.extracted.byline) {
+      state.propertyValues[prop.name] = state.extracted.byline;
+    } else if (prop.type === "rich_text" && SOURCE_NAME_PATTERN.test(prop.name) && state.extracted.siteName) {
+      state.propertyValues[prop.name] = state.extracted.siteName;
+    } else if (prop.type === "url" && URL_NAME_PATTERN.test(prop.name)) {
+      state.propertyValues[prop.name] = state.extracted.url;
+    }
+  }
 }
 
 function renderClipForm(): void {
@@ -170,6 +230,8 @@ function renderClipForm(): void {
     for (const prop of db.properties) {
       if (prop.type === "select" || prop.type === "multi_select") {
         app.append(renderOptionProperty(prop));
+      } else if (prop.type === "rich_text" || prop.type === "url" || prop.type === "date") {
+        app.append(renderTextProperty(prop));
       }
     }
   }
@@ -188,6 +250,7 @@ function renderClipForm(): void {
 
   app.querySelector("#db-select")!.addEventListener("change", (e) => {
     state.selectedDatabaseId = (e.target as HTMLSelectElement).value;
+    autoMapProperties();
     render();
   });
   app.querySelector("#title-input")!.addEventListener("input", (e) => {
@@ -228,6 +291,19 @@ function renderOptionProperty(prop: NotionPropertySummary): HTMLElement {
   return wrapper;
 }
 
+function renderTextProperty(prop: NotionPropertySummary): HTMLElement {
+  const wrapper = el("div", { class: "field" }, [el("label", {}, [prop.name])]);
+  const current = state.propertyValues[prop.name];
+  const value = typeof current === "string" ? current : "";
+  const inputType = prop.type === "date" ? "date" : "text";
+  const input = el("input", { type: inputType, "data-prop-name": prop.name, value });
+  input.addEventListener("input", (e) => {
+    state.propertyValues[prop.name] = (e.target as HTMLInputElement).value;
+  });
+  wrapper.append(input);
+  return wrapper;
+}
+
 function renderResult(): void {
   if (!state.result) return;
   if (state.result.ok) {
@@ -260,7 +336,13 @@ async function saveClip(): Promise<void> {
   ];
   if (db) {
     for (const prop of db.properties) {
-      if (prop.type === "select" || prop.type === "multi_select") {
+      if (
+        prop.type === "select" ||
+        prop.type === "multi_select" ||
+        prop.type === "rich_text" ||
+        prop.type === "url" ||
+        prop.type === "date"
+      ) {
         const value = state.propertyValues[prop.name];
         if (value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0)) {
           properties.push({ name: prop.name, type: prop.type, value });
@@ -283,6 +365,13 @@ async function saveClip(): Promise<void> {
     state.result = response;
     if (response.ok) {
       state.usage = await sendMessage<UsageState>({ type: "GET_USAGE" });
+      if (state.hostname) {
+        void sendMessage({
+          type: "REMEMBER_DATABASE",
+          hostname: state.hostname,
+          databaseId: state.selectedDatabaseId,
+        });
+      }
     }
   } catch (err) {
     state.result = { ok: false, errorCode: "UNKNOWN", message: (err as Error).message };
