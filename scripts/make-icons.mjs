@@ -1,93 +1,46 @@
-// Generates simple solid-color placeholder PNG icons (no external deps).
-import { deflateSync } from "node:zlib";
+// Renders the extension icon from an SVG source via headless Chrome
+// (puppeteer-core, already a devDependency — see extraction-test.mjs for the
+// same pattern), instead of hand-rolling raw, non-anti-aliased PNG pixels.
+// This gives a properly anti-aliased result at every size.
+import puppeteer from "puppeteer-core";
 import { writeFileSync, mkdirSync } from "node:fs";
 
-function crc32(buf) {
-  let c;
-  const table = crc32.table ?? (crc32.table = (() => {
-    const t = new Uint32Array(256);
-    for (let n = 0; n < 256; n++) {
-      c = n;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      t[n] = c >>> 0;
-    }
-    return t;
-  })());
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) crc = table[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
-}
+const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 
-function chunk(type, data) {
-  const typeBuf = Buffer.from(type, "ascii");
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length, 0);
-  const crcBuf = Buffer.alloc(4);
-  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
-  return Buffer.concat([len, typeBuf, data, crcBuf]);
-}
-
-// Draws a filled circle in `bgColor` with a white "C" ring mark on top (a
-// ring with a wedge cut out on the right, standing in for ClipKeep's
-// initial). Still a generated placeholder, not a designed logo, but more
-// distinctive than a plain solid dot.
-function makePng(size, bgColor, markColor) {
-  const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // color type RGBA
-  ihdr[10] = 0;
-  ihdr[11] = 0;
-  ihdr[12] = 0;
-
-  const cx = size / 2;
-  const cy = size / 2;
-  const bgRadius = size * 0.46;
-  const ringOuter = size * 0.32;
-  const ringInner = size * 0.2;
-  const openHalfAngleDeg = 40;
-
-  const rowLen = size * 4;
-  const raw = Buffer.alloc((rowLen + 1) * size);
-  for (let y = 0; y < size; y++) {
-    const rowStart = y * (rowLen + 1);
-    raw[rowStart] = 0; // filter type: none
-    for (let x = 0; x < size; x++) {
-      const px = rowStart + 1 + x * 4;
-      const dx = x - cx + 0.5;
-      const dy = y - cy + 0.5;
-      const distSq = dx * dx + dy * dy;
-      const dist = Math.sqrt(distSq);
-      const insideBg = distSq <= bgRadius * bgRadius;
-      const insideRing = dist <= ringOuter && dist >= ringInner;
-      const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
-      const isOpening = Math.abs(angleDeg) <= openHalfAngleDeg;
-      const insideMark = insideRing && !isOpening;
-
-      const [r, g, b, a] = insideMark ? markColor : bgColor;
-      const visible = insideMark || insideBg;
-      raw[px] = r;
-      raw[px + 1] = g;
-      raw[px + 2] = b;
-      raw[px + 3] = visible ? a : 0;
-    }
-  }
-  const idat = deflateSync(raw);
-  return Buffer.concat([
-    sig,
-    chunk("IHDR", ihdr),
-    chunk("IDAT", idat),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
+// A rounded-square gradient background with a white bookmark/ribbon mark —
+// "clip and keep" — rather than a plain letter monogram or solid dot. The
+// viewBox stays fixed at 128x128 for consistent coordinates; width/height
+// are set per target size so Chrome rasterizes (and anti-aliases) directly
+// at that resolution rather than us scaling a bitmap after the fact.
+function svgMarkup(size) {
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5B8DEF"/>
+      <stop offset="1" stop-color="#3730A3"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="128" height="128" rx="28" fill="url(#bg)"/>
+  <path d="M42 26 H86 V100 L64 84 L42 100 Z" fill="#ffffff"/>
+</svg>`.trim();
 }
 
 mkdirSync(new URL("../public/icons", import.meta.url), { recursive: true });
-const bgColor = [37, 99, 235, 255]; // brand blue circle
-const markColor = [255, 255, 255, 255]; // white "C" ring mark
-for (const size of [16, 48, 128]) {
-  const png = makePng(size, bgColor, markColor);
-  writeFileSync(new URL(`../public/icons/icon${size}.png`, import.meta.url), png);
+
+const browser = await puppeteer.launch({ executablePath: CHROME_PATH, headless: true });
+try {
+  const page = await browser.newPage();
+  for (const size of [16, 48, 128]) {
+    await page.setViewport({ width: size, height: size, deviceScaleFactor: 1 });
+    await page.setContent(
+      `<!doctype html><html><body style="margin:0;padding:0;">${svgMarkup(size)}</body></html>`
+    );
+    const svgEl = await page.$("svg");
+    const buf = await svgEl.screenshot({ omitBackground: true, type: "png" });
+    writeFileSync(new URL(`../public/icons/icon${size}.png`, import.meta.url), buf);
+  }
+} finally {
+  await browser.close();
 }
 console.log("Icons generated.");
