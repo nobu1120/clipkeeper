@@ -119,10 +119,32 @@ function htmlToBlocks(root: HTMLElement): NotionBlockDraft[] {
   return blocks;
 }
 
+// Readability scores candidates by text/link density and class/id keywords
+// like "nav"/"menu"/"footer" — but sites that ship obfuscated, hashed class
+// names (common with bundled/minified frontends) give it nothing to match,
+// so a large site-chrome block (e.g. a portal's link-heavy top header) can
+// out-score the real content or even stand in as the only content on pages
+// that have no single article (portal/aggregator homepages). Stripping
+// semantic/ARIA chrome landmarks before Readability ever sees them sidesteps
+// that failure mode. Landmarks nested inside <article>/<main> are left
+// alone since those are typically legitimate in-content elements (e.g. a
+// post's <header> title+byline block), not page chrome.
+const PAGE_CHROME_SELECTOR =
+  "header, nav, footer, aside, [role='navigation'], [role='banner'], [role='contentinfo'], [role='complementary']";
+
+function stripPageChrome(doc: Document): void {
+  for (const el of Array.from(doc.querySelectorAll(PAGE_CHROME_SELECTOR))) {
+    if (!el.closest("article, main, [role='main']")) {
+      el.remove();
+    }
+  }
+}
+
 export function extractFullPage(): ExtractedContent {
   let article: ReturnType<Readability["parse"]> | null = null;
   try {
     const docClone = document.cloneNode(true) as Document;
+    stripPageChrome(docClone);
     const reader = new Readability(docClone, { keepClasses: false });
     article = reader.parse();
   } catch {

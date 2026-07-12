@@ -23,8 +23,21 @@ try {
   console.log("extractFullPage() ->", JSON.stringify(fullPageResult, null, 2).slice(0, 1500));
 
   assert.equal(fullPageResult.title, "テスト記事タイトル", "title should come from Readability's article title");
-  assert.ok(!JSON.stringify(fullPageResult.blocks).includes("ナビゲーション"), "nav chrome should be excluded by Readability");
-  assert.ok(!JSON.stringify(fullPageResult.blocks).includes("フッター"), "footer chrome should be excluded by Readability");
+  assert.ok(!JSON.stringify(fullPageResult.blocks).includes("フッター"), "footer chrome should be excluded");
+
+  // Regression guard for a real bug found via live QA on Yahoo! JAPAN's
+  // portal homepage: a link-heavy <header> sitting outside <main> (a common
+  // real-world pattern for site-wide navigation menus) got picked up as the
+  // "article" itself — since the site's obfuscated/hashed class names gave
+  // Readability's own nav-keyword heuristic nothing to match, and the page
+  // has no single real article for it to prefer instead. stripPageChrome()
+  // removes header/nav/footer/aside/ARIA-landmark chrome outside
+  // <article>/<main> before Readability ever scores it, so none of these
+  // menu items should survive into the extracted blocks.
+  const blocksJson = JSON.stringify(fullPageResult.blocks);
+  for (const menuItem of ["ホームページに設定する", "きっず版", "アプリ版", "ヘルプ", "オークション", "ショッピング"]) {
+    assert.ok(!blocksJson.includes(menuItem), `header nav menu item "${menuItem}" should be stripped as page chrome`);
+  }
 
   // Regression guard: the fixture's content lives inside a <main> element
   // (not <article>/<div>/<section>/<figure>). htmlToBlocks() previously only
